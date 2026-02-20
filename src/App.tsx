@@ -38,8 +38,40 @@ export default function App() {
   const [editPcName, setEditPcName] = useState('');
 
   useEffect(() => {
-    fetchData();
+    // Initialize LocalStorage if empty
+    const savedPcs = localStorage.getItem('pcs');
+    const savedHistory = localStorage.getItem('history');
+    
+    if (!savedPcs) {
+      const initialPcs: PC[] = [
+        { id: 1, name: 'PC-01', status: 'available' },
+        { id: 2, name: 'PC-02', status: 'available' },
+        { id: 3, name: 'PC-03', status: 'available' },
+        { id: 4, name: 'PC-04', status: 'available' },
+        { id: 5, name: 'PC-05', status: 'available' },
+        { id: 6, name: 'MacBook-Pro-01', status: 'available' },
+        { id: 7, name: 'Surface-01', status: 'available' },
+      ];
+      localStorage.setItem('pcs', JSON.stringify(initialPcs));
+      setPcs(initialPcs);
+    } else {
+      setPcs(JSON.parse(savedPcs));
+    }
+
+    if (!savedHistory) {
+      localStorage.setItem('history', JSON.stringify([]));
+      setHistory([]);
+    } else {
+      setHistory(JSON.parse(savedHistory));
+    }
   }, []);
+
+  const saveToLocalStorage = (newPcs: PC[], newHistory: Assignment[]) => {
+    localStorage.setItem('pcs', JSON.stringify(newPcs));
+    localStorage.setItem('history', JSON.stringify(newHistory));
+    setPcs(newPcs);
+    setHistory(newHistory);
+  };
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('da-DK', {
@@ -55,133 +87,97 @@ export default function App() {
     });
   };
 
-  const fetchData = async () => {
-    try {
-      const [pcsRes, historyRes] = await Promise.all([
-        fetch('/api/pcs'),
-        fetch('/api/history')
-      ]);
-      setPcs(await pcsRes.json());
-      setHistory(await historyRes.json());
-    } catch (err) {
-      console.error('Failed to fetch data', err);
-    }
-  };
-
-  const handleAssign = async (e: FormEvent) => {
+  const handleAssign = (e: FormEvent) => {
     e.preventDefault();
     if (!selectedPcId || !personName) return;
 
     setIsSubmitting(true);
-    try {
-      await fetch('/api/assignments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          pc_id: selectedPcId,
-          person_name: personName,
-          person_type: personType
-        })
-      });
-      setPersonName('');
-      setSelectedPcId(null);
-      await fetchData();
-    } catch (err) {
-      console.error('Failed to assign PC', err);
-    } finally {
-      setIsSubmitting(false);
-    }
+    
+    const newPcs = pcs.map(pc => 
+      pc.id === selectedPcId ? { ...pc, status: 'assigned' as const } : pc
+    );
+
+    const newAssignment: Assignment = {
+      id: Date.now(),
+      pc_id: selectedPcId,
+      pc_name: pcs.find(p => p.id === selectedPcId)?.name || 'Unknown',
+      person_name: personName,
+      person_type: personType,
+      assigned_at: new Date().toISOString(),
+      returned_at: null
+    };
+
+    const newHistory = [newAssignment, ...history];
+    
+    saveToLocalStorage(newPcs, newHistory);
+    setPersonName('');
+    setSelectedPcId(null);
+    setIsSubmitting(false);
   };
 
-  const handleReturn = async (assignmentId: number) => {
-    console.log('Returning assignment:', assignmentId);
-    if (!assignmentId) {
-      console.error('No assignment ID provided to handleReturn');
-      return;
-    }
-    try {
-      const res = await fetch(`/api/assignments/${assignmentId}/return`, {
-        method: 'PUT'
-      });
-      if (!res.ok) throw new Error('Failed to return PC');
-      await fetchData();
-    } catch (err) {
-      console.error('Failed to return PC', err);
-    }
+  const handleReturn = (assignmentId: number) => {
+    const assignment = history.find(h => h.id === assignmentId);
+    if (!assignment) return;
+
+    const newHistory = history.map(h => 
+      h.id === assignmentId ? { ...h, returned_at: new Date().toISOString() } : h
+    );
+
+    const newPcs = pcs.map(pc => 
+      pc.id === assignment.pc_id ? { ...pc, status: 'available' as const } : pc
+    );
+
+    saveToLocalStorage(newPcs, newHistory);
   };
 
-  const handleAddPc = async (e: FormEvent) => {
+  const handleAddPc = (e: FormEvent) => {
     e.preventDefault();
     if (!newPcName) return;
-    try {
-      const res = await fetch('/api/pcs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: newPcName })
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        alert(data.error || 'Failed to add PC');
-        return;
-      }
-      setNewPcName('');
-      await fetchData();
-    } catch (err) {
-      console.error('Failed to add PC', err);
-    }
-  };
 
-  const handleUpdatePc = async (id: number) => {
-    if (!editPcName) return;
-    try {
-      const res = await fetch(`/api/pcs/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: editPcName })
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        alert(data.error || 'Failed to update PC');
-        return;
-      }
-      setEditingPcId(null);
-      await fetchData();
-    } catch (err) {
-      console.error('Failed to update PC', err);
-    }
-  };
-
-  const handleDeletePc = async (id: number) => {
-    console.log('Frontend: handleDeletePc called for ID:', id);
-    
-    if (id === undefined || id === null) {
-      alert('Error: PC ID is missing.');
+    if (pcs.some(p => p.name.toLowerCase() === newPcName.toLowerCase())) {
+      alert('PC name must be unique');
       return;
     }
 
-    try {
-      console.log('Frontend: Sending DELETE request to /api/pcs/' + id);
-      const res = await fetch(`/api/pcs/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      const data = await res.json();
-      console.log('Frontend: Server response:', data);
-      
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to delete PC');
-      }
-      
-      await fetchData();
-      console.log('Frontend: PC deleted and data refreshed.');
-    } catch (err) {
-      console.error('Frontend: Delete PC Error:', err);
-      alert(err instanceof Error ? err.message : 'An error occurred while deleting the PC.');
+    const newPc: PC = {
+      id: Date.now(),
+      name: newPcName,
+      status: 'available'
+    };
+
+    saveToLocalStorage([...pcs, newPc], history);
+    setNewPcName('');
+  };
+
+  const handleUpdatePc = (id: number) => {
+    if (!editPcName) return;
+
+    if (pcs.some(p => p.id !== id && p.name.toLowerCase() === editPcName.toLowerCase())) {
+      alert('PC name must be unique');
+      return;
     }
+
+    const newPcs = pcs.map(pc => 
+      pc.id === id ? { ...pc, name: editPcName } : pc
+    );
+
+    saveToLocalStorage(newPcs, history);
+    setEditingPcId(null);
+  };
+
+  const handleDeletePc = (id: number) => {
+    const pc = pcs.find(p => p.id === id);
+    if (!pc) return;
+
+    if (pc.status === 'assigned') {
+      alert(`Cannot remove "${pc.name}" because it is currently assigned. Please return it first.`);
+      return;
+    }
+
+    const newPcs = pcs.filter(p => p.id !== id);
+    const newHistory = history.filter(h => h.pc_id !== id);
+
+    saveToLocalStorage(newPcs, newHistory);
   };
 
   return (
@@ -270,64 +266,67 @@ export default function App() {
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {pcs.map((pc) => (
-                    <div 
-                      key={pc.id}
-                      className={`p-6 rounded-3xl border transition-all ${
-                        pc.status === 'available' 
-                          ? 'bg-white border-slate-200 hover:border-red-200 shadow-sm' 
-                          : 'bg-slate-50 border-slate-200'
-                      }`}
-                    >
-                      <div className="flex justify-between items-start mb-4">
-                        <div className="flex items-center gap-3">
-                          <div className={`p-3 rounded-2xl ${
-                            pc.status === 'available' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'
-                          }`}>
-                            <Monitor className="w-6 h-6" />
-                          </div>
-                          <div>
-                            <h3 className="font-black text-slate-800 tracking-tight">{pc.name}</h3>
-                            <span className={`text-[10px] font-black uppercase tracking-[0.15em] ${
-                              pc.status === 'available' ? 'text-emerald-500' : 'text-amber-500'
+                  {pcs.map((pc) => {
+                    const activeAssignment = history.find(h => h.pc_id === pc.id && h.returned_at === null);
+                    return (
+                      <div 
+                        key={pc.id}
+                        className={`p-6 rounded-3xl border transition-all ${
+                          pc.status === 'available' 
+                            ? 'bg-white border-slate-200 hover:border-red-200 shadow-sm' 
+                            : 'bg-slate-50 border-slate-200'
+                        }`}
+                      >
+                        <div className="flex justify-between items-start mb-4">
+                          <div className="flex items-center gap-3">
+                            <div className={`p-3 rounded-2xl ${
+                              pc.status === 'available' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'
                             }`}>
-                              {pc.status}
-                            </span>
+                              <Monitor className="w-6 h-6" />
+                            </div>
+                            <div>
+                              <h3 className="font-black text-slate-800 tracking-tight">{pc.name}</h3>
+                              <span className={`text-[10px] font-black uppercase tracking-[0.15em] ${
+                                pc.status === 'available' ? 'text-emerald-500' : 'text-amber-500'
+                              }`}>
+                                {pc.status}
+                              </span>
+                            </div>
                           </div>
+                          {pc.status === 'assigned' && activeAssignment && (
+                            <button 
+                              onClick={() => handleReturn(activeAssignment.id)}
+                              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 transition-all shadow-sm active:scale-95"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" />
+                              Return
+                            </button>
+                          )}
                         </div>
-                        {pc.status === 'assigned' && (
+
+                        {pc.status === 'assigned' && activeAssignment ? (
+                          <div className="mt-4 p-4 bg-white/50 rounded-2xl border border-slate-100">
+                            <div className="flex items-center gap-3 text-sm text-slate-700">
+                              <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center">
+                                {activeAssignment.person_type === 'teacher' ? <User className="w-4 h-4" /> : <GraduationCap className="w-4 h-4" />}
+                              </div>
+                              <div>
+                                <p className="font-bold leading-none">{activeAssignment.person_name}</p>
+                                <p className="text-[10px] text-slate-400 uppercase font-black mt-1 tracking-wider">{activeAssignment.person_type}</p>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
                           <button 
-                            onClick={() => handleReturn(pc.assignment_id!)}
-                            className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 transition-all shadow-sm active:scale-95"
+                            onClick={() => setSelectedPcId(pc.id)}
+                            className="w-full mt-4 py-3 rounded-2xl border-2 border-dashed border-slate-200 text-slate-400 text-sm font-bold hover:border-red-300 hover:text-red-500 hover:bg-red-50/30 transition-all active:scale-[0.98]"
                           >
-                            <RotateCcw className="w-3.5 h-3.5" />
-                            Return
+                            Assign Workstation
                           </button>
                         )}
                       </div>
-
-                      {pc.status === 'assigned' ? (
-                        <div className="mt-4 p-4 bg-white/50 rounded-2xl border border-slate-100">
-                          <div className="flex items-center gap-3 text-sm text-slate-700">
-                            <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center">
-                              {pc.person_type === 'teacher' ? <User className="w-4 h-4" /> : <GraduationCap className="w-4 h-4" />}
-                            </div>
-                            <div>
-                              <p className="font-bold leading-none">{pc.person_name}</p>
-                              <p className="text-[10px] text-slate-400 uppercase font-black mt-1 tracking-wider">{pc.person_type}</p>
-                            </div>
-                          </div>
-                        </div>
-                      ) : (
-                        <button 
-                          onClick={() => setSelectedPcId(pc.id)}
-                          className="w-full mt-4 py-3 rounded-2xl border-2 border-dashed border-slate-200 text-slate-400 text-sm font-bold hover:border-red-300 hover:text-red-500 hover:bg-red-50/30 transition-all active:scale-[0.98]"
-                        >
-                          Assign Workstation
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                   {pcs.length === 0 && (
                     <div className="col-span-full py-20 text-center bg-white rounded-3xl border-2 border-dashed border-slate-200">
                        <Monitor className="w-12 h-12 text-slate-200 mx-auto mb-4" />
