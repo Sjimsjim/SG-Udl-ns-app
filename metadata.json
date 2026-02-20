@@ -1,5 +1,4 @@
 {
-  "name": "PC Assignment Tracker",
-  "description": "A simple system to track PC assignments to students and teachers, including usage history.",
-  "requestFramePermissions": []
+  "name": "SG Udlåns liste",
+  "description": "Udviklet af SimonIT"
 }
